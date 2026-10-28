@@ -131,6 +131,10 @@
   map.getPane('affiliates').style.zIndex = 640;
   map.createPane('seminaries');
   map.getPane('seminaries').style.zIndex = 630;
+  map.createPane('synods');
+  map.getPane('synods').style.zIndex = 390;
+  map.createPane('synodLabels');
+  map.getPane('synodLabels').style.zIndex = 620;
 
   const icons = {};
   function iconFor(c) {
@@ -204,14 +208,15 @@
     const fields = payload.fields;
     const ix = (name) => fields.indexOf(name);
     const iId = ix('id'), iName = ix('name'), iLat = ix('lat'), iLon = ix('lon'), iRating = ix('rating'),
-      iAddr = ix('address'), iUrl = ix('url'), iMaps = ix('maps'), iSize = ix('size'), iAff = ix('affiliate');
+      iAddr = ix('address'), iUrl = ix('url'), iMaps = ix('maps'), iSize = ix('size'), iAff = ix('affiliate'), iSynod = ix('synod');
 
     const out = [];
     for (const row of payload.rows) {
       const lat = row[iLat], lon = row[iLon];
       if (typeof row[iName] !== 'string' || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
       const address = row[iAddr] || '';
-      const m = address.match(/,\s*([A-Z]{2})\s+(\d{5})/);
+      // Puerto Rico ZIPs arrive without their leading zeros ("PR 901").
+      const m = address.match(/,\s*([A-Z]{2})\s+(\d{3,5})/);
       const state = m ? m[1] : '';
       const c = {
         id: String(row[iId]),
@@ -223,6 +228,7 @@
         maps: row[iMaps],
         size: row[iSize] || '',
         affiliate: !!row[iAff],
+        synod: iSynod >= 0 ? row[iSynod] || '' : '',
         state: state.toLowerCase(),
         haystack: normalize(row[iName] + ' ' + address + ' ' + (STATES[state] || '')),
         marker: null
@@ -249,6 +255,7 @@
     ratings: new Set(['3', '2', '1']),
     sizes: new Set(['XS', 'S', 'M', 'L', 'XL', '']),
     affiliatesOnly: false,
+    synod: '',
     tokens: []
   };
   const allRatingsChecked = () => document.querySelectorAll('input[name="rating"]:not(:checked)').length === 0;
@@ -264,6 +271,7 @@
 
   function passes(c) {
     if (filters.affiliatesOnly && !c.affiliate) return false;
+    if (filters.synod && c.synod !== filters.synod) return false;
     if (RATING_LABELS[c.rating] ? !filters.ratings.has(String(c.rating)) : !allRatingsChecked()) return false;
     if (!filters.sizes.has(c.size)) return false;
     for (const t of filters.tokens) if (!tokenMatches(c, t)) return false;
@@ -283,9 +291,10 @@
     affiliateLayer.clearLayers();
     for (const m of pinned) affiliateLayer.addLayer(m);
 
-    const isDefault = !filters.tokens.length && !filters.affiliatesOnly &&
+    const isDefault = !filters.tokens.length && !filters.affiliatesOnly && !filters.synod &&
       filters.sizes.size === 6 && allRatingsChecked();
     $('reset').hidden = isDefault;
+    updateSynods();
 
     if (fit && visible.length && visible.length < churches.length) {
       const bounds = L.latLngBounds(visible.map((c) => [c.lat, c.lon]));
@@ -367,14 +376,21 @@
       const row = document.querySelector(`.result[data-id="${CSS.escape(id)}"]`);
       if (row) row.classList.add('is-active');
     }
-    if (id) params.set('church', id);
-    else params.delete('church');
+    setUrlParam('church', id);
+  }
+
+  function setUrlParam(name, value) {
+    if (value) params.set(name, value);
+    else params.delete(name);
     const qs = params.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   }
 
   function focusChurch(c) {
     if (mobileQuery.matches) setSheet('peek');
+    // From the synod overview, jump in past the switch point first so the
+    // pins are on the map before the popup opens.
+    if (map.getZoom() < SYNOD_ZOOM) map.setView([c.lat, c.lon], 10, { animate: false });
     if (c.affiliate) {
       map.setView([c.lat, c.lon], Math.max(map.getZoom(), 13));
       c.marker.openPopup();
@@ -471,6 +487,9 @@
     filters.tokens = [];
     filters.affiliatesOnly = false;
     $('affiliates-only').checked = false;
+    filters.synod = '';
+    $('synod').value = '';
+    setUrlParam('synod', null);
     for (const input of document.querySelectorAll('input[name="rating"], input[name="size"]')) {
       input.checked = true;
       (input.name === 'rating' ? filters.ratings : filters.sizes).add(input.value);
@@ -549,10 +568,7 @@
       if (on) seminaryLayer.addTo(map);
       else seminaryLayer.remove();
     }
-    if (on) params.set('seminaries', '1');
-    else params.delete('seminaries');
-    const qs = params.toString();
-    history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+    setUrlParam('seminaries', on ? '1' : null);
   }
   $('show-seminaries').addEventListener('change', (e) => setSeminaries(e.target.checked));
 
@@ -589,20 +605,159 @@
     }
   });
 
+  // ---------- Synods ----------
+  //
+  // Zoomed out, the map shows synod outlines with a count badge in each
+  // instead of pins. Zoomed in (or while searching or filtering to one
+  // synod or the affiliates), it switches back to pins and clusters.
+
+  const SYNOD_ZOOM = 6;
+  const synodLayer = L.layerGroup().addTo(map);
+  const synods = new Map();
+  let mode = null;
+
+  function buildSynods(payload) {
+    if (!payload || !Array.isArray(payload.synods)) return;
+    const totals = {};
+    for (const c of churches) totals[c.synod] = (totals[c.synod] || 0) + 1;
+
+    for (const s of payload.synods) {
+      const shape = L.polygon(s.rings, {
+        pane: 'synods',
+        className: 'synod-shape',
+        color: '#0B0924',
+        weight: 1.2,
+        opacity: 0.5,
+        fillColor: '#2c64a8',
+        fillOpacity: 0.07,
+        smoothFactor: 1.5
+      });
+      // Zoom target: the outline ring holding the badge, so Alaska-Northwest
+      // zooms to Washington rather than to the whole of Alaska.
+      let focus = null;
+      for (const ring of s.rings) {
+        const b = L.latLngBounds(ring);
+        if (b.contains(s.label) && (!focus || b.getNorthEast().distanceTo(b.getSouthWest()) >
+          focus.getNorthEast().distanceTo(focus.getSouthWest()))) focus = b;
+      }
+      const badge = L.marker(s.label, {
+        pane: 'synodLabels',
+        keyboard: true,
+        title: s.name,
+        icon: L.divIcon({ className: 'synod-badge-wrap', html: '', iconSize: null })
+      });
+      const entry = { id: s.id, name: s.name, short: s.short, shape, badge, focus: focus || shape.getBounds(), total: totals[s.id] || 0 };
+      shape.on('click', () => zoomToSynod(entry));
+      badge.on('click', () => zoomToSynod(entry));
+      shape.on('mouseover', () => { if (mode === 'synods') shape.setStyle({ fillOpacity: 0.16 }); });
+      shape.on('mouseout', () => styleSynod(entry));
+      shape.addTo(synodLayer);
+      synods.set(s.id, entry);
+    }
+
+    const select = $('synod');
+    for (const s of [...synods.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!s.total) continue;
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = `${s.name} (${s.total.toLocaleString()})`;
+      select.appendChild(opt);
+    }
+  }
+
+  function zoomToSynod(s) {
+    const zoom = Math.max(SYNOD_ZOOM, map.getBoundsZoom(s.focus, false, L.point(40, 40)));
+    map.flyTo(s.focus.getCenter(), Math.min(zoom, 9), { duration: 0.6 });
+  }
+
+  function styleSynod(s) {
+    const selected = filters.synod === s.id;
+    const dimmed = filters.synod && !selected;
+    s.shape.setStyle(mode === 'synods'
+      ? { weight: 1.2, opacity: 0.5, fillOpacity: 0.07 }
+      : { weight: selected ? 2.5 : 1, opacity: selected ? 0.85 : dimmed ? 0.15 : 0.3, fillOpacity: dimmed ? 0.06 : 0 });
+  }
+
+  // Badge counts follow the rating and size filters.
+  function updateSynods() {
+    if (!synods.size) return;
+    const counts = {};
+    for (const c of visible) counts[c.synod] = (counts[c.synod] || 0) + 1;
+    for (const s of synods.values()) {
+      const n = counts[s.id] || 0;
+      s.count = n;
+      s.badge.setIcon(L.divIcon({
+        className: 'synod-badge-wrap',
+        iconSize: null,
+        html: `<span class="synod-badge"><b>${n.toLocaleString()}</b><span>${esc(s.short)}</span></span>`
+      }));
+      styleSynod(s);
+    }
+    updateMode();
+  }
+
+  function setMode(next) {
+    if (next === mode) return;
+    mode = next;
+    $('map').classList.toggle('mode-synods', mode === 'synods');
+    if (mode === 'synods') {
+      clusters.remove();
+      affiliateLayer.remove();
+      for (const s of synods.values()) if (s.count) s.badge.addTo(synodLayer);
+    } else {
+      for (const s of synods.values()) s.badge.remove();
+      clusters.addTo(map);
+      affiliateLayer.addTo(map);
+    }
+    for (const s of synods.values()) styleSynod(s);
+  }
+
+  function updateMode() {
+    $('map').classList.toggle('synod-compact', map.getZoom() < 4.5);
+    const overview = synods.size && map.getZoom() < SYNOD_ZOOM &&
+      !filters.tokens.length && !filters.affiliatesOnly && !filters.synod;
+    if (overview && mode === 'synods') {
+      // Already in overview; a filter change may have emptied or refilled a synod.
+      for (const s of synods.values()) {
+        if (s.count && !synodLayer.hasLayer(s.badge)) s.badge.addTo(synodLayer);
+        else if (!s.count) s.badge.remove();
+      }
+    }
+    setMode(overview ? 'synods' : 'pins');
+  }
+  map.on('zoomend', updateMode);
+
+  $('synod').addEventListener('change', (e) => {
+    filters.synod = e.target.value;
+    setUrlParam('synod', filters.synod || null);
+    applyFilters(!!filters.synod);
+  });
+
   // ---------- Boot ----------
 
-  fetch('data/churches.json')
-    .then((res) => {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.json();
-    })
-    .then((payload) => {
+  const getJson = (url) => fetch(url).then((res) => {
+    if (!res.ok) throw new Error(url + ': HTTP ' + res.status);
+    return res.json();
+  });
+
+  Promise.all([getJson('data/churches.json'), getJson('data/synods.json').catch((err) => {
+    console.error(err); // the map still works without outlines
+    return null;
+  })])
+    .then(([payload, synodPayload]) => {
       if (!payload || !Array.isArray(payload.fields) || !Array.isArray(payload.rows)) {
         throw new Error('unexpected data shape');
       }
       churches = parseChurches(payload);
       if (churches.some((c) => c.rating === 1)) document.querySelector('.chip-r1').hidden = false;
-      applyFilters(false);
+      buildSynods(synodPayload);
+
+      const linkedSynod = params.get('synod');
+      if (linkedSynod && synods.has(linkedSynod)) {
+        filters.synod = linkedSynod;
+        $('synod').value = linkedSynod;
+      }
+      applyFilters(!!filters.synod && !params.get('church'));
 
       const linked = params.get('church');
       if (linked && byId.has(linked)) focusChurch(byId.get(linked));

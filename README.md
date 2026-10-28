@@ -11,6 +11,11 @@ A reworked version of [pftk-map](https://github.com/Presbyterians-for-the-Kingdo
 - Filter chips for rating, size and affiliates only, plus a Reset button.
 - Seminaries are a toggle layer on the same map. `seminary-map.html` redirects to `?seminaries=1`.
 
+**Synod overview**
+- Zoomed out, the map shows PC(USA) synod outlines with a church count in each instead of cluster circles. Clicking a synod zooms in. From zoom level 6 the pins and clusters come back, and the outlines stay as faint borders.
+- A Synod filter in the sidebar outlines one synod, dims the rest and filters the list. It can be linked to as `?synod=<id>`.
+- Counts follow the rating and size filters. Searching or choosing "Affiliates only" always shows pins.
+
 **Popups and sharing**
 - Rating, size and affiliate status are shown as tags. Directions, Website and Share are buttons.
 - Every church has a shareable link (`?church=<id>`) that opens the map on it.
@@ -34,6 +39,12 @@ python -m http.server 8000
 ## Deploying
 
 `.github/workflows/pages.yml` runs on push to `main`, every 6 hours, and on demand. It fetches upstream data, rebuilds `data/`, and publishes to GitHub Pages. In the repo's Settings → Pages, set **Source** to **GitHub Actions**.
+
+## Synod boundaries
+
+`data/synods.json` is built by `scripts/build_synods.py`, which merges Census county boundaries (us-atlas) into synods. Most synods are whole states. The counties that belong elsewhere are listed in `COUNTY_OVERRIDES`: Southern California, North Idaho and El Paso. `build_data.py` uses the outlines to tag each church with its synod.
+
+**Not yet verified:** the state and county mapping was written without an official PC(USA) source. Before relying on it, check it against PC(USA)'s synod map. The script's docstring lists two known simplifications: eastern Ohio is left in the Synod of the Covenant, and West Virginia's eastern panhandle in the Synod of the Trinity.
 
 ## Link preview image
 
