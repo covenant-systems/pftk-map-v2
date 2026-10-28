@@ -34,3 +34,7 @@ python -m http.server 8000
 ## Deploying
 
 `.github/workflows/pages.yml` runs on push to `main`, every 6 hours, and on demand. It fetches upstream data, rebuilds `data/`, and publishes to GitHub Pages. In the repo's Settings → Pages, set **Source** to **GitHub Actions**.
+
+## Link preview image
+
+`og-image.png` is the 1200x630 card shown when the link is shared on Facebook, LinkedIn, iMessage, Slack or X. The Open Graph tags in `index.html` point to it. To redraw it from the current data, run `pip install pillow`, then `python scripts/make_og_image.py`. If the site moves to a new URL, update the absolute URLs in those tags.

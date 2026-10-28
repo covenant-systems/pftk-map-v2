@@ -37,7 +37,7 @@ jobs:
       - name: Assemble site
         run: |
           mkdir _site
-          cp -r index.html seminary-map.html .nojekyll css js data vendor denominational-seals _site/
+          cp -r index.html seminary-map.html og-image.png .nojekyll css js data vendor denominational-seals _site/
 
       - uses: actions/upload-pages-artifact@v3
         with:
