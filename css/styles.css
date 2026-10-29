@@ -638,6 +638,88 @@ input {
   visibility: hidden;
 }
 
+/* Shows the synod or presbytery the map is filtered to, centred over the
+   map. The crumb steps up to the synod; the cross clears both. */
+.region-chip {
+  position: fixed;
+  top: 12px;
+  left: calc((100vw + var(--panel-w)) / 2);
+  z-index: 1500;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - var(--panel-w) - 120px);
+  padding: 4px 4px 4px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.85rem;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+
+.region-chip[hidden] {
+  display: none;
+}
+
+.region-chip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.region-crumb {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+}
+
+.region-crumb:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.region-sep {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.region-close {
+  flex: 0 0 28px;
+  height: 28px;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.region-close:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+@media (max-width: 760px) {
+  .region-chip {
+    left: 50%;
+    max-width: calc(100vw - 80px);
+    font-size: 0.8rem;
+  }
+
+  .region-crumb,
+  .region-sep {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .synod-legend {
     width: 150px;

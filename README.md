@@ -14,7 +14,8 @@ A reworked version of [pftk-map](https://github.com/Presbyterians-for-the-Kingdo
 **Synods and presbyteries**
 - The map has three levels. Zoomed all the way out, it shows the 16 synods. From about state level (zoom 5) it shows presbyteries, with synod borders drawn on top. From about metro level (zoom 7.5) the pins and clusters come back, and the outlines stay as faint borders.
 - Each synod or presbytery shows a badge with its church count and is shaded by the average rating of its churches, on a fixed scale from blue (2, Good fit) to green (3, Great fit). Hovering a badge shows the exact average. Presbyteries with fewer than 5 rated churches are drawn paler, because one or two ratings can swing their color.
-- Clicking a synod zooms in to its presbyteries, and clicking a presbytery zooms in to its pins. Badges that would overlap shrink to just their count, and crowded presbytery badges hide until you zoom in.
+- Clicking a synod or presbytery filters the map and list to just its churches and frames it. A synod opens on its presbyteries, and a presbytery shows its pins. A chip at the top of the map names the selection: on desktop, click the synod name in it to step back up a level, or the × to show everything again.
+- Badges that would overlap shrink to just their count, and crowded presbytery badges hide until you zoom in.
 - Synod and Presbytery filters in the sidebar. Picking a synod shows its presbyteries and narrows the presbytery list. Picking a presbytery shows its pins. Both can be linked to: `?synod=<id>`, `?presbytery=<id>`.
 - Counts and colors follow the rating and size filters. Searching or choosing "Affiliates only" always shows pins.
 - Church popups name the church's presbytery and synod.

@@ -128,6 +128,12 @@
   </aside>
 
   <main id="map" aria-label="Map of churches"></main>
+  <div class="region-chip" id="region-chip" role="status" hidden>
+    <button type="button" class="region-crumb" id="region-crumb"></button>
+    <span class="region-sep" id="region-sep" aria-hidden="true">›</span>
+    <strong id="region-name"></strong>
+    <button type="button" class="region-close" id="region-close" aria-label="Show all synods" title="Show all synods">&times;</button>
+  </div>
   <div class="toast" id="toast" role="status" hidden></div>
 
   <script src="vendor/leaflet/leaflet.js" defer></script>

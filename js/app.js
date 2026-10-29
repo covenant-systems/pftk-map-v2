@@ -109,10 +109,13 @@
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 
+  const US_BOUNDS = [[24.5, -124.8], [49.4, -66.9]];
+
+  // Leaves room for the region chip at the top and, on phones, the sheet.
   function mapPadding() {
     return mobileQuery.matches
-      ? { paddingTopLeft: [16, 16], paddingBottomRight: [16, 190] }
-      : { padding: [32, 32] };
+      ? { paddingTopLeft: [16, 60], paddingBottomRight: [16, 190] }
+      : { paddingTopLeft: [32, 64], paddingBottomRight: [32, 32] };
   }
 
   // fitBounds on a zero-size container (hidden iframe, background tab)
@@ -124,7 +127,7 @@
     if (!fitted && map.getSize().x > 0) {
       fitted = true;
       // Linked churches, synods and presbyteries set their own view once data loads.
-      if (!['church', 'synod', 'presbytery'].some((k) => params.get(k))) map.fitBounds([[24.5, -124.8], [49.4, -66.9]], mapPadding());
+      if (!['church', 'synod', 'presbytery'].some((k) => params.get(k))) map.fitBounds(US_BOUNDS, mapPadding());
     }
   }).observe($('map'));
 
@@ -308,6 +311,7 @@
       filters.sizes.size === 6 && allRatingsChecked();
     $('reset').hidden = isDefault;
     updateRegions();
+    updateRegionChip();
 
     if (fit && visible.length && visible.length < churches.length) {
       const bounds = L.latLngBounds(visible.map((c) => [c.lat, c.lon]));
@@ -664,8 +668,8 @@
           title: r.name,
           icon: L.divIcon({ className: 'synod-badge-wrap', html: '', iconSize: null })
         });
-        entry.shape.on('click', () => zoomToRegion(entry));
-        entry.badge.on('click', () => zoomToRegion(entry));
+        entry.shape.on('click', () => selectRegion(entry));
+        entry.badge.on('click', () => selectRegion(entry));
         entry.shape.on('mouseover', () => styleRegion(entry, true));
         entry.shape.on('mouseout', () => styleRegion(entry));
         entry.shape.addTo(regionLayer);
@@ -674,12 +678,51 @@
     }
   }
 
-  // Clicking a synod opens its presbyteries; clicking a presbytery, its pins.
-  function zoomToRegion(r) {
-    const floor = r.kind === 'synod' ? PRESBYTERY_ZOOM : PIN_ZOOM;
-    const zoom = Math.max(floor, map.getBoundsZoom(r.focus, false, L.point(40, 40)));
-    map.flyTo(r.focus.getCenter(), Math.min(zoom, 10), { duration: 0.6 });
+  // Clicking a synod or presbytery (or picking one from the dropdowns)
+  // filters the map and list to its churches. This is the one place that
+  // sets those two filters, so the dropdowns, URL and on-map chip agree.
+  function selectRegion(r) {
+    if (r.kind === 'synod') setRegionFilter(r.id, '', true);
+    else setRegionFilter(r.synod, r.id, true);
   }
+
+  function setRegionFilter(synod, presbytery, frame) {
+    const p = regions.presbytery.get(presbytery);
+    filters.presbytery = p ? p.id : '';
+    filters.synod = (p && p.synod) || synod || '';
+    $('synod').value = filters.synod;
+    fillPresbyterySelect();
+    setUrlParam('synod', filters.synod || null);
+    setUrlParam('presbytery', filters.presbytery || null);
+    applyFilters(false);
+    if (frame) frameRegion();
+  }
+
+  // Frames the chosen region's main outline (so Alaska-Northwest frames
+  // Washington), its churches if it has no outline, or the whole country.
+  function frameRegion() {
+    const r = regions.presbytery.get(filters.presbytery) || regions.synod.get(filters.synod);
+    let bounds = r && r.focus;
+    if (!bounds && r && visible.length) bounds = L.latLngBounds(visible.map((c) => [c.lat, c.lon]));
+    map.flyToBounds(bounds || US_BOUNDS, Object.assign({ maxZoom: 10, duration: 0.6 }, mapPadding()));
+  }
+
+  function updateRegionChip() {
+    const p = regions.presbytery.get(filters.presbytery);
+    const s = regions.synod.get(filters.synod);
+    const chip = $('region-chip');
+    chip.hidden = !p && !s;
+    if (chip.hidden) return;
+    $('region-crumb').hidden = $('region-sep').hidden = !(p && s);
+    if (p && s) {
+      $('region-crumb').textContent = s.name;
+      $('region-crumb').title = `Show all of ${s.name}`;
+    }
+    $('region-name').textContent = (p || s).name;
+  }
+
+  $('region-crumb').addEventListener('click', () => setRegionFilter(filters.synod, '', true));
+  $('region-close').addEventListener('click', () => setRegionFilter('', '', true));
 
   // Average rating -> color, on a fixed 2 (Good fit, blue) to 3 (Great fit,
   // green) scale so a color means the same thing whatever the others
@@ -850,23 +893,8 @@
     select.value = filters.synod;
   }
 
-  $('synod').addEventListener('change', (e) => {
-    filters.synod = e.target.value;
-    const p = regions.presbytery.get(filters.presbytery);
-    if (p && filters.synod && p.synod !== filters.synod) {
-      filters.presbytery = '';
-      setUrlParam('presbytery', null);
-    }
-    fillPresbyterySelect();
-    setUrlParam('synod', filters.synod || null);
-    applyFilters(!!filters.synod);
-  });
-
-  $('presbytery').addEventListener('change', (e) => {
-    filters.presbytery = e.target.value;
-    setUrlParam('presbytery', filters.presbytery || null);
-    applyFilters(!!filters.presbytery);
-  });
+  $('synod').addEventListener('change', (e) => setRegionFilter(e.target.value, '', true));
+  $('presbytery').addEventListener('change', (e) => setRegionFilter(filters.synod, e.target.value, true));
 
   function addLegend() {
     const legend = L.control({ position: 'bottomleft' });
@@ -911,13 +939,10 @@
       if (synodPayload && Array.isArray(synodPayload.synods)) buildRegions('synod', synodPayload.synods, 'synods');
       if (regions.synod.size || regions.presbytery.size) addLegend();
 
-      const linkedSynod = params.get('synod');
-      const linkedPresbytery = params.get('presbytery');
-      if (linkedSynod && regions.synod.has(linkedSynod)) filters.synod = linkedSynod;
-      if (linkedPresbytery && regions.presbytery.has(linkedPresbytery)) filters.presbytery = linkedPresbytery;
       fillSynodSelect();
-      fillPresbyterySelect();
-      applyFilters(!!(filters.synod || filters.presbytery) && !params.get('church'));
+      const linkedSynod = regions.synod.has(params.get('synod')) ? params.get('synod') : '';
+      setRegionFilter(linkedSynod, params.get('presbytery'), !params.get('church') &&
+        !!(linkedSynod || regions.presbytery.has(params.get('presbytery'))));
 
       const linked = params.get('church');
       if (linked && byId.has(linked)) focusChurch(byId.get(linked));
