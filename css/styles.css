@@ -544,6 +544,42 @@ input {
   color: rgba(255, 255, 255, 0.8);
 }
 
+.synod-legend {
+  width: 190px;
+  padding: 8px 12px 9px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: var(--shadow);
+  font-size: 0.72rem;
+  color: var(--ink-2);
+}
+
+.leaflet-container:not(.mode-synods) .synod-legend {
+  display: none;
+}
+
+.synod-legend p {
+  margin: 0 0 5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* Same hue ramp as rampColor() in app.js; the middle stop keeps the CSS
+   gradient from cutting through grey the way an RGB blend would. */
+.synod-legend-bar {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(to right, hsl(215, 62%, 44%), hsl(180, 62%, 44%), hsl(145, 62%, 44%));
+  opacity: 0.75;
+}
+
+.synod-legend-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+}
+
 .select-row {
   display: flex;
   align-items: center;
@@ -801,7 +837,8 @@ input {
     bottom: calc(var(--peek, 178px) + 16px);
   }
 
-  .leaflet-bottom.leaflet-right {
+  .leaflet-bottom.leaflet-right,
+  .leaflet-bottom.leaflet-left {
     bottom: 170px;
   }
 }

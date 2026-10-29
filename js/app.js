@@ -649,11 +649,20 @@
       const entry = { id: s.id, name: s.name, short: s.short, shape, badge, focus: focus || shape.getBounds(), total: totals[s.id] || 0 };
       shape.on('click', () => zoomToSynod(entry));
       badge.on('click', () => zoomToSynod(entry));
-      shape.on('mouseover', () => { if (mode === 'synods') shape.setStyle({ fillOpacity: 0.16 }); });
+      shape.on('mouseover', () => { if (mode === 'synods') styleSynod(entry, true); });
       shape.on('mouseout', () => styleSynod(entry));
       shape.addTo(synodLayer);
       synods.set(s.id, entry);
     }
+
+    const legend = L.control({ position: 'bottomleft' });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create('div', 'synod-legend');
+      div.innerHTML = '<p>Average PftK rating</p><span class="synod-legend-bar" aria-hidden="true"></span>' +
+        '<div class="synod-legend-ends"><span>2 · Good fit</span><span>3 · Great fit</span></div>';
+      return div;
+    };
+    legend.addTo(map);
 
     const select = $('synod');
     for (const s of [...synods.values()].sort((a, b) => a.name.localeCompare(b.name))) {
@@ -670,26 +679,56 @@
     map.flyTo(s.focus.getCenter(), Math.min(zoom, 9), { duration: 0.6 });
   }
 
-  function styleSynod(s) {
+  // Average rating -> color, on a fixed 2 (Good fit, blue) to 3 (Great fit,
+  // green) scale so a synod's color means the same thing whatever the others
+  // average. Anything below 2 (rating 1 churches) stays full blue.
+  // Interpolating hue rather than RGB keeps the middle of the scale a
+  // clear teal instead of a muddy grey, so nearby averages stay distinct.
+  const RAMP_HUE_LOW = 215;
+  const RAMP_HUE_HIGH = 145;
+  function rampColor(avg) {
+    const t = Math.max(0, Math.min(1, avg - 2));
+    return `hsl(${Math.round(RAMP_HUE_LOW + (RAMP_HUE_HIGH - RAMP_HUE_LOW) * t)}, 62%, 44%)`;
+  }
+
+  function styleSynod(s, hover) {
     const selected = filters.synod === s.id;
     const dimmed = filters.synod && !selected;
     s.shape.setStyle(mode === 'synods'
-      ? { weight: 1.2, opacity: 0.5, fillOpacity: 0.07 }
-      : { weight: selected ? 2.5 : 1, opacity: selected ? 0.85 : dimmed ? 0.15 : 0.3, fillOpacity: dimmed ? 0.06 : 0 });
+      ? {
+          color: '#fff', weight: 1.5, opacity: 0.9,
+          fillColor: s.avg ? rampColor(s.avg) : '#9a9cb0',
+          fillOpacity: hover ? 0.72 : 0.55
+        }
+      : {
+          color: '#0B0924', weight: selected ? 2.5 : 1, opacity: selected ? 0.85 : dimmed ? 0.15 : 0.3,
+          fillColor: '#0B0924', fillOpacity: dimmed ? 0.06 : 0
+        });
   }
 
   // Badge counts follow the rating and size filters.
   function updateSynods() {
     if (!synods.size) return;
     const counts = {};
-    for (const c of visible) counts[c.synod] = (counts[c.synod] || 0) + 1;
+    const rated = {};
+    for (const c of visible) {
+      counts[c.synod] = (counts[c.synod] || 0) + 1;
+      if (RATING_LABELS[c.rating]) {
+        const r = rated[c.synod] || (rated[c.synod] = { sum: 0, n: 0 });
+        r.sum += c.rating;
+        r.n += 1;
+      }
+    }
     for (const s of synods.values()) {
       const n = counts[s.id] || 0;
       s.count = n;
+      s.avg = rated[s.id] ? rated[s.id].sum / rated[s.id].n : null;
+      const tip = `${s.name}: ${n.toLocaleString()} ${n === 1 ? 'church' : 'churches'}` +
+        (s.avg ? `, average rating ${s.avg.toFixed(2)}` : '');
       s.badge.setIcon(L.divIcon({
         className: 'synod-badge-wrap',
         iconSize: null,
-        html: `<span class="synod-badge"><b>${n.toLocaleString()}</b><span>${esc(s.short)}</span></span>`
+        html: `<span class="synod-badge" title="${esc(tip)}"><b>${n.toLocaleString()}</b><span>${esc(s.short)}</span></span>`
       }));
       styleSynod(s);
     }

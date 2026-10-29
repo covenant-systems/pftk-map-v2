@@ -14,7 +14,8 @@ A reworked version of [pftk-map](https://github.com/Presbyterians-for-the-Kingdo
 **Synod overview**
 - Zoomed out, the map shows PC(USA) synod outlines with a church count in each instead of cluster circles. Clicking a synod zooms in. From zoom level 6 the pins and clusters come back, and the outlines stay as faint borders.
 - A Synod filter in the sidebar outlines one synod, dims the rest and filters the list. It can be linked to as `?synod=<id>`.
-- Counts follow the rating and size filters. Searching or choosing "Affiliates only" always shows pins.
+- Each synod is shaded by the average rating of its churches, on a fixed scale from blue (2, Good fit) to green (3, Great fit), with a legend. Hovering a badge shows the exact average. Synods with only a few churches, such as Southwest (10) and Boriquén (4), can swing on one or two ratings.
+- Counts and colors follow the rating and size filters. Searching or choosing "Affiliates only" always shows pins.
 
 **Popups and sharing**
 - Rating, size and affiliate status are shown as tags. Directions, Website and Share are buttons.
