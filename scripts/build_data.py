@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-CHURCH_FIELDS = ["id", "name", "lat", "lon", "rating", "address", "url", "maps", "size", "affiliate", "synod"]
+CHURCH_FIELDS = ["id", "name", "lat", "lon", "rating", "address", "url", "maps", "size", "affiliate", "synod", "presbytery"]
 SEMINARY_FIELDS = ["name", "city", "address", "denomination", "lat", "lon"]
 
 SIZES = {"XS", "S", "M", "L", "XL"}
@@ -62,27 +62,28 @@ def is_truthy(value):
     return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "y", "affiliate", "affiliated"}
 
 
-def load_synods(path):
-    """Synod outlines from build_synods.py, with bounding boxes for a quick
-    reject before the point-in-polygon test."""
+def load_regions(path, key):
+    """Outlines from build_regions.py as (id, rings, record), each ring with
+    its bounding box for a quick reject before the point-in-polygon test."""
     if not path.exists():
-        return []
-    synods = []
-    for s in json.loads(path.read_text(encoding="utf-8"))["synods"]:
+        return [], {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    regions = []
+    for r in payload[key]:
         rings = []
-        for r in s["rings"]:
-            lats = [p[0] for p in r]
-            lons = [p[1] for p in r]
-            rings.append((min(lats), max(lats), min(lons), max(lons), r))
-        synods.append((s["id"], rings))
-    return synods
+        for ring in r.get("rings", []):
+            lats = [p[0] for p in ring]
+            lons = [p[1] for p in ring]
+            rings.append((min(lats), max(lats), min(lons), max(lons), ring))
+        regions.append((r["id"], rings, r))
+    return regions, payload
 
 
-def synod_for(lat, lon, synods):
-    """Even-odd test against each synod's rings. Points that fall just
+def region_for(lat, lon, regions):
+    """Even-odd test against each region's rings. Points that fall just
     outside every outline (a coastal church past the simplified shoreline)
-    go to the synod with the nearest vertex."""
-    for sid, rings in synods:
+    go to the region with the nearest vertex."""
+    for rid, rings, _ in regions:
         inside = False
         for lat0, lat1, lon0, lon1, r in rings:
             if not (lat0 <= lat <= lat1 and lon0 <= lon <= lon1):
@@ -91,18 +92,36 @@ def synod_for(lat, lon, synods):
                 if (ya > lat) != (yb > lat) and lon < (xb - xa) * (lat - ya) / (yb - ya) + xa:
                     inside = not inside
         if inside:
-            return sid
+            return rid
     best, best_d = None, float("inf")
-    for sid, rings in synods:
+    for rid, rings, _ in regions:
         for *_, r in rings:
             for y, x in r:
                 d = (y - lat) ** 2 + (x - lon) ** 2
                 if d < best_d:
-                    best, best_d = sid, d
+                    best, best_d = rid, d
     return best
 
 
-def build_churches(src, synods):
+def placer(out):
+    """Returns place(id, lat, lon) -> (presbytery, synod). A church's
+    presbytery is its recorded one (build_regions.py matched it against the
+    full congregation list) or else the outline it sits in; its synod is
+    always its presbytery's, so the two levels agree."""
+    presbyteries, payload = load_regions(out / "presbyteries.json", "presbyteries")
+    synods, _ = load_regions(out / "synods.json", "synods")
+    overrides = payload.get("church_overrides", {}) if presbyteries else {}
+    synod_of = {rid: rec["synod"] for rid, _, rec in presbyteries}
+
+    def place(church_id, lat, lon):
+        if presbyteries:
+            pid = overrides.get(church_id) or region_for(lat, lon, presbyteries)
+            return pid, synod_of.get(pid)
+        return None, region_for(lat, lon, synods) if synods else None
+    return place
+
+
+def build_churches(src, place):
     features = json.loads(src.read_text(encoding="utf-8"))["features"]
     rows, skipped = [], 0
     for i, f in enumerate(features):
@@ -122,10 +141,12 @@ def build_churches(src, synods):
         if m:
             maps = m.group(1)
         affiliate = any(is_truthy(p.get(k)) for k in ("affiliate", "affliate", "is_affiliate", "pftk_affiliate"))
+        church_id = str(f.get("id") or i)
+        presbytery, synod = place(church_id, point[0], point[1])
         rows.append([
-            str(f.get("id") or i), name, point[0], point[1], rating,
+            church_id, name, point[0], point[1], rating,
             text(p.get("full_address")), text(p.get("url")), maps, size, 1 if affiliate else 0,
-            synod_for(point[0], point[1], synods) if synods else None,
+            synod, presbytery,
         ])
     rows.sort(key=lambda r: r[1].lower())
     return {"fields": CHURCH_FIELDS, "rows": rows}, skipped
@@ -156,8 +177,7 @@ def main():
     out = Path(sys.argv[2] if len(sys.argv) > 2 else "data")
     out.mkdir(parents=True, exist_ok=True)
 
-    synods = load_synods(out / "synods.json")
-    churches, skipped_c = build_churches(upstream / "PCUSA_Congregations.geojson", synods)
+    churches, skipped_c = build_churches(upstream / "PCUSA_Congregations.geojson", placer(out))
     seminaries, skipped_s = build_seminaries(upstream / "seminaries.geojson")
     if not churches["rows"]:
         sys.exit("No valid congregations found; refusing to publish an empty map.")

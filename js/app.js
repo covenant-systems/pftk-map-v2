@@ -123,7 +123,8 @@
     map.invalidateSize();
     if (!fitted && map.getSize().x > 0) {
       fitted = true;
-      if (!params.get('church')) map.fitBounds([[24.5, -124.8], [49.4, -66.9]], mapPadding());
+      // Linked churches, synods and presbyteries set their own view once data loads.
+      if (!['church', 'synod', 'presbytery'].some((k) => params.get(k))) map.fitBounds([[24.5, -124.8], [49.4, -66.9]], mapPadding());
     }
   }).observe($('map'));
 
@@ -131,6 +132,8 @@
   map.getPane('affiliates').style.zIndex = 640;
   map.createPane('seminaries');
   map.getPane('seminaries').style.zIndex = 630;
+  map.createPane('presbyteries');
+  map.getPane('presbyteries').style.zIndex = 385;
   map.createPane('synods');
   map.getPane('synods').style.zIndex = 390;
   map.createPane('synodLabels');
@@ -180,6 +183,7 @@
     return `<div class="pop">
       <h2>${esc(c.name)}</h2>
       ${c.address ? `<p class="pop-addr">${esc(c.address)}</p>` : ''}
+      ${regionLine(c)}
       ${tags.length ? `<div class="pop-tags">${tags.join('')}</div>` : ''}
       ${site ? `<a class="pop-site" href="${esc(site)}" target="_blank" rel="noopener">${esc(displayHost(site))}</a>` : ''}
       <div class="pop-actions">
@@ -188,6 +192,12 @@
         <button type="button" data-share="${esc(c.id)}">Share</button>
       </div>
     </div>`;
+  }
+
+  function regionLine(c) {
+    const names = [regions.presbytery.get(c.presbytery), regions.synod.get(c.synod)]
+      .filter(Boolean).map((r) => esc(r.name));
+    return names.length ? `<p class="pop-region">${names.join(' · ')}</p>` : '';
   }
 
   const popupOptions = {
@@ -208,7 +218,7 @@
     const fields = payload.fields;
     const ix = (name) => fields.indexOf(name);
     const iId = ix('id'), iName = ix('name'), iLat = ix('lat'), iLon = ix('lon'), iRating = ix('rating'),
-      iAddr = ix('address'), iUrl = ix('url'), iMaps = ix('maps'), iSize = ix('size'), iAff = ix('affiliate'), iSynod = ix('synod');
+      iAddr = ix('address'), iUrl = ix('url'), iMaps = ix('maps'), iSize = ix('size'), iAff = ix('affiliate'), iSynod = ix('synod'), iPresbytery = ix('presbytery');
 
     const out = [];
     for (const row of payload.rows) {
@@ -229,6 +239,7 @@
         size: row[iSize] || '',
         affiliate: !!row[iAff],
         synod: iSynod >= 0 ? row[iSynod] || '' : '',
+        presbytery: iPresbytery >= 0 ? row[iPresbytery] || '' : '',
         state: state.toLowerCase(),
         haystack: normalize(row[iName] + ' ' + address + ' ' + (STATES[state] || '')),
         marker: null
@@ -256,6 +267,7 @@
     sizes: new Set(['XS', 'S', 'M', 'L', 'XL', '']),
     affiliatesOnly: false,
     synod: '',
+    presbytery: '',
     tokens: []
   };
   const allRatingsChecked = () => document.querySelectorAll('input[name="rating"]:not(:checked)').length === 0;
@@ -272,6 +284,7 @@
   function passes(c) {
     if (filters.affiliatesOnly && !c.affiliate) return false;
     if (filters.synod && c.synod !== filters.synod) return false;
+    if (filters.presbytery && c.presbytery !== filters.presbytery) return false;
     if (RATING_LABELS[c.rating] ? !filters.ratings.has(String(c.rating)) : !allRatingsChecked()) return false;
     if (!filters.sizes.has(c.size)) return false;
     for (const t of filters.tokens) if (!tokenMatches(c, t)) return false;
@@ -291,10 +304,10 @@
     affiliateLayer.clearLayers();
     for (const m of pinned) affiliateLayer.addLayer(m);
 
-    const isDefault = !filters.tokens.length && !filters.affiliatesOnly && !filters.synod &&
+    const isDefault = !filters.tokens.length && !filters.affiliatesOnly && !filters.synod && !filters.presbytery &&
       filters.sizes.size === 6 && allRatingsChecked();
     $('reset').hidden = isDefault;
-    updateSynods();
+    updateRegions();
 
     if (fit && visible.length && visible.length < churches.length) {
       const bounds = L.latLngBounds(visible.map((c) => [c.lat, c.lon]));
@@ -390,7 +403,7 @@
     if (mobileQuery.matches) setSheet('peek');
     // From the synod overview, jump in past the switch point first so the
     // pins are on the map before the popup opens.
-    if (map.getZoom() < SYNOD_ZOOM) map.setView([c.lat, c.lon], 10, { animate: false });
+    if (map.getZoom() < PIN_ZOOM) map.setView([c.lat, c.lon], 10, { animate: false });
     if (c.affiliate) {
       map.setView([c.lat, c.lon], Math.max(map.getZoom(), 13));
       c.marker.openPopup();
@@ -488,8 +501,11 @@
     filters.affiliatesOnly = false;
     $('affiliates-only').checked = false;
     filters.synod = '';
+    filters.presbytery = '';
     $('synod').value = '';
+    fillPresbyterySelect();
     setUrlParam('synod', null);
+    setUrlParam('presbytery', null);
     for (const input of document.querySelectorAll('input[name="rating"], input[name="size"]')) {
       input.checked = true;
       (input.name === 'rating' ? filters.ratings : filters.sizes).add(input.value);
@@ -605,82 +621,68 @@
     }
   });
 
-  // ---------- Synods ----------
+  // ---------- Synods and presbyteries ----------
   //
-  // Zoomed out, the map shows synod outlines with a count badge in each
-  // instead of pins. Zoomed in (or while searching or filtering to one
-  // synod or the affiliates), it switches back to pins and clusters.
+  // Three levels: synod outlines with count badges when zoomed all the way
+  // out, presbytery outlines from about state level, and pins from about
+  // metro level in. Outlines are shaded by the average rating of their
+  // churches. Searching, "Affiliates only" or picking a presbytery always
+  // shows pins.
 
-  const SYNOD_ZOOM = 6;
-  const synodLayer = L.layerGroup().addTo(map);
-  const synods = new Map();
+  const PRESBYTERY_ZOOM = 5; // below this: synods
+  const PIN_ZOOM = 7.5;      // from this: pins
+  const MIN_RATED = 5;       // fewer rated churches than this: faded color
+  const regionLayer = L.layerGroup().addTo(map);
+  const badgeLayer = L.layerGroup().addTo(map);
+  const regions = { synod: new Map(), presbytery: new Map() };
+  const KIND_OF_MODE = { synods: 'synod', presbyteries: 'presbytery' };
   let mode = null;
+  let badgesDirty = true;
 
-  function buildSynods(payload) {
-    if (!payload || !Array.isArray(payload.synods)) return;
+  function buildRegions(kind, list, pane) {
     const totals = {};
-    for (const c of churches) totals[c.synod] = (totals[c.synod] || 0) + 1;
-
-    for (const s of payload.synods) {
-      const shape = L.polygon(s.rings, {
-        pane: 'synods',
-        className: 'synod-shape',
-        color: '#0B0924',
-        weight: 1.2,
-        opacity: 0.5,
-        fillColor: '#2c64a8',
-        fillOpacity: 0.07,
-        smoothFactor: 1.5
-      });
-      // Zoom target: the outline ring holding the badge, so Alaska-Northwest
-      // zooms to Washington rather than to the whole of Alaska.
-      let focus = null;
-      for (const ring of s.rings) {
-        const b = L.latLngBounds(ring);
-        if (b.contains(s.label) && (!focus || b.getNorthEast().distanceTo(b.getSouthWest()) >
-          focus.getNorthEast().distanceTo(focus.getSouthWest()))) focus = b;
+    for (const c of churches) totals[c[kind]] = (totals[c[kind]] || 0) + 1;
+    for (const r of list) {
+      const entry = {
+        kind, id: r.id, name: r.name, short: r.short, synod: r.synod || null,
+        total: totals[r.id] || 0, count: 0, avg: null, rated: 0, shape: null, badge: null
+      };
+      if (Array.isArray(r.rings) && r.rings.length && r.label) {
+        entry.shape = L.polygon(r.rings, { pane, className: `region-shape ${kind}-shape`, smoothFactor: 1.5 });
+        // Zoom target: the outline ring holding the badge, so Alaska-Northwest
+        // zooms to Washington rather than to the whole of Alaska.
+        let focus = null;
+        for (const ring of r.rings) {
+          const b = L.latLngBounds(ring);
+          if (b.contains(r.label) && (!focus || b.getNorthEast().distanceTo(b.getSouthWest()) >
+            focus.getNorthEast().distanceTo(focus.getSouthWest()))) focus = b;
+        }
+        entry.focus = focus || entry.shape.getBounds();
+        entry.badge = L.marker(r.label, {
+          pane: 'synodLabels',
+          keyboard: true,
+          title: r.name,
+          icon: L.divIcon({ className: 'synod-badge-wrap', html: '', iconSize: null })
+        });
+        entry.shape.on('click', () => zoomToRegion(entry));
+        entry.badge.on('click', () => zoomToRegion(entry));
+        entry.shape.on('mouseover', () => styleRegion(entry, true));
+        entry.shape.on('mouseout', () => styleRegion(entry));
+        entry.shape.addTo(regionLayer);
       }
-      const badge = L.marker(s.label, {
-        pane: 'synodLabels',
-        keyboard: true,
-        title: s.name,
-        icon: L.divIcon({ className: 'synod-badge-wrap', html: '', iconSize: null })
-      });
-      const entry = { id: s.id, name: s.name, short: s.short, shape, badge, focus: focus || shape.getBounds(), total: totals[s.id] || 0 };
-      shape.on('click', () => zoomToSynod(entry));
-      badge.on('click', () => zoomToSynod(entry));
-      shape.on('mouseover', () => { if (mode === 'synods') styleSynod(entry, true); });
-      shape.on('mouseout', () => styleSynod(entry));
-      shape.addTo(synodLayer);
-      synods.set(s.id, entry);
-    }
-
-    const legend = L.control({ position: 'bottomleft' });
-    legend.onAdd = () => {
-      const div = L.DomUtil.create('div', 'synod-legend');
-      div.innerHTML = '<p>Average PftK rating</p><span class="synod-legend-bar" aria-hidden="true"></span>' +
-        '<div class="synod-legend-ends"><span>2 · Good fit</span><span>3 · Great fit</span></div>';
-      return div;
-    };
-    legend.addTo(map);
-
-    const select = $('synod');
-    for (const s of [...synods.values()].sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!s.total) continue;
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = `${s.name} (${s.total.toLocaleString()})`;
-      select.appendChild(opt);
+      regions[kind].set(r.id, entry);
     }
   }
 
-  function zoomToSynod(s) {
-    const zoom = Math.max(SYNOD_ZOOM, map.getBoundsZoom(s.focus, false, L.point(40, 40)));
-    map.flyTo(s.focus.getCenter(), Math.min(zoom, 9), { duration: 0.6 });
+  // Clicking a synod opens its presbyteries; clicking a presbytery, its pins.
+  function zoomToRegion(r) {
+    const floor = r.kind === 'synod' ? PRESBYTERY_ZOOM : PIN_ZOOM;
+    const zoom = Math.max(floor, map.getBoundsZoom(r.focus, false, L.point(40, 40)));
+    map.flyTo(r.focus.getCenter(), Math.min(zoom, 10), { duration: 0.6 });
   }
 
   // Average rating -> color, on a fixed 2 (Good fit, blue) to 3 (Great fit,
-  // green) scale so a synod's color means the same thing whatever the others
+  // green) scale so a color means the same thing whatever the others
   // average. Anything below 2 (rating 1 churches) stays full blue.
   // Interpolating hue rather than RGB keeps the middle of the scale a
   // clear teal instead of a muddy grey, so nearby averages stay distinct.
@@ -691,112 +693,231 @@
     return `hsl(${Math.round(RAMP_HUE_LOW + (RAMP_HUE_HIGH - RAMP_HUE_LOW) * t)}, 62%, 44%)`;
   }
 
-  function styleSynod(s, hover) {
-    const selected = filters.synod === s.id;
-    const dimmed = filters.synod && !selected;
-    s.shape.setStyle(mode === 'synods'
-      ? {
-          color: '#fff', weight: 1.5, opacity: 0.9,
-          fillColor: s.avg ? rampColor(s.avg) : '#9a9cb0',
-          fillOpacity: hover ? 0.72 : 0.55
-        }
-      : {
-          color: '#0B0924', weight: selected ? 2.5 : 1, opacity: selected ? 0.85 : dimmed ? 0.15 : 0.3,
-          fillColor: '#0B0924', fillOpacity: dimmed ? 0.06 : 0
-        });
+  function styleRegion(r, hover) {
+    if (!r.shape) return;
+    const selected = filters[r.kind] === r.id;
+    const dimmed = filters[r.kind] && !selected;
+    let style;
+    if (KIND_OF_MODE[mode] === r.kind) {
+      // The level being shown: filled by average rating.
+      const faded = r.rated < MIN_RATED;
+      style = {
+        color: '#fff', weight: r.kind === 'synod' ? 1.5 : 1, opacity: 0.9,
+        fillColor: r.avg ? rampColor(r.avg) : '#9a9cb0',
+        fillOpacity: !r.count ? 0 : (faded ? 0.22 : 0.55) + (hover ? 0.15 : 0)
+      };
+    } else if (mode === 'presbyteries') {
+      // Synod borders drawn over the presbyteries for context.
+      style = { color: '#0B0924', weight: selected ? 2.5 : 1.6, opacity: 0.6, fillOpacity: 0 };
+    } else {
+      // Pins: faint borders, with the chosen synod or presbytery picked out.
+      const base = r.kind === 'synod' ? { weight: 1, opacity: 0.3 } : { weight: 0.6, opacity: 0.18 };
+      style = {
+        color: '#0B0924',
+        weight: selected ? 2.5 : base.weight,
+        opacity: selected ? 0.85 : dimmed ? 0.12 : base.opacity,
+        fillColor: '#0B0924',
+        fillOpacity: dimmed ? 0.06 : 0
+      };
+    }
+    r.shape.setStyle(style);
   }
 
-  // Badge counts follow the rating and size filters.
-  function updateSynods() {
-    if (!synods.size) return;
-    const counts = {};
-    const rated = {};
-    for (const c of visible) {
-      counts[c.synod] = (counts[c.synod] || 0) + 1;
-      if (RATING_LABELS[c.rating]) {
-        const r = rated[c.synod] || (rated[c.synod] = { sum: 0, n: 0 });
-        r.sum += c.rating;
-        r.n += 1;
+  // Counts, averages and colors follow the rating and size filters.
+  function updateRegions() {
+    if (!regions.synod.size && !regions.presbytery.size) return;
+    for (const kind of ['synod', 'presbytery']) {
+      const stats = {};
+      for (const c of visible) {
+        const s = stats[c[kind]] || (stats[c[kind]] = { n: 0, sum: 0, rated: 0 });
+        s.n += 1;
+        if (RATING_LABELS[c.rating]) {
+          s.sum += c.rating;
+          s.rated += 1;
+        }
+      }
+      for (const r of regions[kind].values()) {
+        const s = stats[r.id] || { n: 0, sum: 0, rated: 0 };
+        r.count = s.n;
+        r.rated = s.rated;
+        r.avg = s.rated ? s.sum / s.rated : null;
+        if (!r.badge) continue;
+        const tip = `${r.name}: ${s.n.toLocaleString()} ${s.n === 1 ? 'church' : 'churches'}` +
+          (r.avg ? `, average rating ${r.avg.toFixed(2)}` : '') +
+          (r.rated && r.rated < MIN_RATED ? ' (few ratings)' : '');
+        r.badge.setIcon(L.divIcon({
+          className: 'synod-badge-wrap',
+          iconSize: null,
+          html: `<span class="synod-badge" title="${esc(tip)}"><b>${s.n.toLocaleString()}</b><span>${esc(r.short)}</span></span>`
+        }));
       }
     }
-    for (const s of synods.values()) {
-      const n = counts[s.id] || 0;
-      s.count = n;
-      s.avg = rated[s.id] ? rated[s.id].sum / rated[s.id].n : null;
-      const tip = `${s.name}: ${n.toLocaleString()} ${n === 1 ? 'church' : 'churches'}` +
-        (s.avg ? `, average rating ${s.avg.toFixed(2)}` : '');
-      s.badge.setIcon(L.divIcon({
-        className: 'synod-badge-wrap',
-        iconSize: null,
-        html: `<span class="synod-badge" title="${esc(tip)}"><b>${n.toLocaleString()}</b><span>${esc(s.short)}</span></span>`
-      }));
-      styleSynod(s);
-    }
+    badgesDirty = true;
     updateMode();
   }
 
   function setMode(next) {
-    if (next === mode) return;
+    const changed = next !== mode;
     mode = next;
-    $('map').classList.toggle('mode-synods', mode === 'synods');
-    if (mode === 'synods') {
-      clusters.remove();
-      affiliateLayer.remove();
-      for (const s of synods.values()) if (s.count) s.badge.addTo(synodLayer);
-    } else {
-      for (const s of synods.values()) s.badge.remove();
-      clusters.addTo(map);
-      affiliateLayer.addTo(map);
+    if (changed) {
+      $('map').classList.toggle('mode-synods', mode === 'synods');
+      $('map').classList.toggle('mode-presbyteries', mode === 'presbyteries');
+      if (mode === 'pins') {
+        clusters.addTo(map);
+        affiliateLayer.addTo(map);
+      } else {
+        clusters.remove();
+        affiliateLayer.remove();
+      }
     }
-    for (const s of synods.values()) styleSynod(s);
+    if (changed || badgesDirty) {
+      badgesDirty = false;
+      badgeLayer.clearLayers();
+      const kind = KIND_OF_MODE[mode];
+      if (kind) for (const r of regions[kind].values()) if (r.badge && r.count) badgeLayer.addLayer(r.badge);
+      for (const k of ['synod', 'presbytery']) for (const r of regions[k].values()) styleRegion(r);
+    }
+    declutterBadges();
+  }
+
+  // Busiest regions first: a badge keeps its name if it has room, shrinks
+  // to just its count if not, and (presbyteries only; there are just 16
+  // synods) is hidden if even that would overlap. The shading still shows,
+  // and zooming in brings it back. Relative positions only change with
+  // zoom, not panning.
+  const FULL_BADGE = { w: 104, h: 42 };
+  const COMPACT_BADGE = { w: 38, h: 24 };
+  function declutterBadges() {
+    const kind = KIND_OF_MODE[mode];
+    if (!kind) return;
+    const shown = [...regions[kind].values()]
+      .filter((r) => r.badge && r.count && r.badge.getElement())
+      .sort((a, b) => b.count - a.count);
+    const placed = [];
+    const fits = (p, size) => !placed.some((q) =>
+      Math.abs(q.x - p.x) < (q.w + size.w) / 2 && Math.abs(q.y - p.y) < (q.h + size.h) / 2);
+    for (const r of shown) {
+      const p = map.latLngToLayerPoint(r.badge.getLatLng());
+      const size = fits(p, FULL_BADGE) ? FULL_BADGE
+        : fits(p, COMPACT_BADGE) || kind === 'synod' ? COMPACT_BADGE : null;
+      const el = r.badge.getElement();
+      el.classList.toggle('is-compact', size === COMPACT_BADGE);
+      el.classList.toggle('is-hidden', !size);
+      if (size) placed.push({ x: p.x, y: p.y, w: size.w, h: size.h });
+    }
   }
 
   function updateMode() {
-    $('map').classList.toggle('synod-compact', map.getZoom() < 4.5);
-    const overview = synods.size && map.getZoom() < SYNOD_ZOOM &&
-      !filters.tokens.length && !filters.affiliatesOnly && !filters.synod;
-    if (overview && mode === 'synods') {
-      // Already in overview; a filter change may have emptied or refilled a synod.
-      for (const s of synods.values()) {
-        if (s.count && !synodLayer.hasLayer(s.badge)) s.badge.addTo(synodLayer);
-        else if (!s.count) s.badge.remove();
-      }
+    const z = map.getZoom();
+    let next = 'pins';
+    const overview = !filters.tokens.length && !filters.affiliatesOnly && !filters.presbytery;
+    if (overview && z < PIN_ZOOM) {
+      if (z < PRESBYTERY_ZOOM && !filters.synod && regions.synod.size) next = 'synods';
+      else if (regions.presbytery.size) next = 'presbyteries';
     }
-    setMode(overview ? 'synods' : 'pins');
+    setMode(next);
   }
   map.on('zoomend', updateMode);
 
+  function fillPresbyterySelect() {
+    const select = $('presbytery');
+    select.textContent = '';
+    select.appendChild(new Option(filters.synod ? 'All in this synod' : 'All presbyteries', ''));
+    const list = [...regions.presbytery.values()]
+      .filter((p) => p.total && (!filters.synod || p.synod === filters.synod))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const synodName = (id) => (regions.synod.get(id) || { name: id || '' }).name;
+    const groups = new Map();
+    for (const p of list) {
+      const key = filters.synod ? '' : p.synod;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    }
+    for (const [key, items] of [...groups].sort((a, b) => synodName(a[0]).localeCompare(synodName(b[0])))) {
+      const parent = key
+        ? select.appendChild(Object.assign(document.createElement('optgroup'), { label: synodName(key) }))
+        : select;
+      for (const p of items) parent.appendChild(new Option(`${p.name} (${p.total.toLocaleString()})`, p.id));
+    }
+    select.value = filters.presbytery;
+  }
+
+  function fillSynodSelect() {
+    const select = $('synod');
+    for (const s of [...regions.synod.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (s.total) select.appendChild(new Option(`${s.name} (${s.total.toLocaleString()})`, s.id));
+    }
+    select.value = filters.synod;
+  }
+
   $('synod').addEventListener('change', (e) => {
     filters.synod = e.target.value;
+    const p = regions.presbytery.get(filters.presbytery);
+    if (p && filters.synod && p.synod !== filters.synod) {
+      filters.presbytery = '';
+      setUrlParam('presbytery', null);
+    }
+    fillPresbyterySelect();
     setUrlParam('synod', filters.synod || null);
     applyFilters(!!filters.synod);
   });
 
-  // ---------- Boot ----------
-
-  const getJson = (url) => fetch(url).then((res) => {
-    if (!res.ok) throw new Error(url + ': HTTP ' + res.status);
-    return res.json();
+  $('presbytery').addEventListener('change', (e) => {
+    filters.presbytery = e.target.value;
+    setUrlParam('presbytery', filters.presbytery || null);
+    applyFilters(!!filters.presbytery);
   });
 
-  Promise.all([getJson('data/churches.json'), getJson('data/synods.json').catch((err) => {
-    console.error(err); // the map still works without outlines
-    return null;
-  })])
-    .then(([payload, synodPayload]) => {
+  function addLegend() {
+    const legend = L.control({ position: 'bottomleft' });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create('div', 'synod-legend');
+      div.innerHTML = '<p>Average PftK rating</p><span class="synod-legend-bar" aria-hidden="true"></span>' +
+        '<div class="synod-legend-ends"><span>2 · Good fit</span><span>3 · Great fit</span></div>' +
+        `<p class="legend-faded">Paler: fewer than ${MIN_RATED} rated churches</p>`;
+      return div;
+    };
+    legend.addTo(map);
+  }
+
+  // ---------- Boot ----------
+
+  // Outlines are optional: without them the map still works with pins only.
+  const getJson = (url, optional) => fetch(url)
+    .then((res) => {
+      if (!res.ok) throw new Error(url + ': HTTP ' + res.status);
+      return res.json();
+    })
+    .catch((err) => {
+      if (!optional) throw err;
+      console.error(err);
+      return null;
+    });
+
+  Promise.all([
+    getJson('data/churches.json'),
+    getJson('data/synods.json', true),
+    getJson('data/presbyteries.json', true)
+  ])
+    .then(([payload, synodPayload, presbyteryPayload]) => {
       if (!payload || !Array.isArray(payload.fields) || !Array.isArray(payload.rows)) {
         throw new Error('unexpected data shape');
       }
       churches = parseChurches(payload);
       if (churches.some((c) => c.rating === 1)) document.querySelector('.chip-r1').hidden = false;
-      buildSynods(synodPayload);
+      if (presbyteryPayload && Array.isArray(presbyteryPayload.presbyteries)) {
+        buildRegions('presbytery', presbyteryPayload.presbyteries, 'presbyteries');
+      }
+      if (synodPayload && Array.isArray(synodPayload.synods)) buildRegions('synod', synodPayload.synods, 'synods');
+      if (regions.synod.size || regions.presbytery.size) addLegend();
 
       const linkedSynod = params.get('synod');
-      if (linkedSynod && synods.has(linkedSynod)) {
-        filters.synod = linkedSynod;
-        $('synod').value = linkedSynod;
-      }
-      applyFilters(!!filters.synod && !params.get('church'));
+      const linkedPresbytery = params.get('presbytery');
+      if (linkedSynod && regions.synod.has(linkedSynod)) filters.synod = linkedSynod;
+      if (linkedPresbytery && regions.presbytery.has(linkedPresbytery)) filters.presbytery = linkedPresbytery;
+      fillSynodSelect();
+      fillPresbyterySelect();
+      applyFilters(!!(filters.synod || filters.presbytery) && !params.get('church'));
 
       const linked = params.get('church');
       if (linked && byId.has(linked)) focusChurch(byId.get(linked));

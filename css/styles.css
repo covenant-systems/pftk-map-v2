@@ -495,8 +495,14 @@ input {
 
 /* ---------- Synod overview ---------- */
 
-.leaflet-container:not(.mode-synods) .synod-shape {
+.leaflet-container:not(.mode-synods) .synod-shape,
+.leaflet-container:not(.mode-presbyteries) .presbytery-shape {
   pointer-events: none;
+}
+
+/* Presbyteries aren't drawn at all in the synod overview. */
+.mode-synods .presbytery-shape {
+  display: none;
 }
 
 .synod-badge-wrap {
@@ -554,8 +560,15 @@ input {
   color: var(--ink-2);
 }
 
-.leaflet-container:not(.mode-synods) .synod-legend {
+.leaflet-container:not(.mode-synods):not(.mode-presbyteries) .synod-legend,
+.leaflet-container:not(.mode-presbyteries) .legend-faded {
   display: none;
+}
+
+.synod-legend p.legend-faded {
+  margin: 6px 0 0;
+  font-weight: 400;
+  color: var(--ink-2);
 }
 
 .synod-legend p {
@@ -605,20 +618,36 @@ input {
   color: var(--ink);
 }
 
-/* Far out, the eastern synods sit too close for labels; show counts only
-   (the name is still in the badge's title tooltip). */
-.synod-compact .synod-badge {
+/* Badges too close to a busier one show only their count (set by
+   declutterBadges() in app.js; the name stays in the title tooltip). */
+.synod-badge-wrap.is-compact .synod-badge {
   min-width: 0;
   padding: 3px 8px 4px;
   border-radius: 999px;
 }
 
-.synod-compact .synod-badge b {
+.synod-badge-wrap.is-compact .synod-badge b {
   font-size: 0.82rem;
 }
 
-.synod-compact .synod-badge span {
+.synod-badge-wrap.is-compact .synod-badge span {
   display: none;
+}
+
+.synod-badge-wrap.is-hidden {
+  visibility: hidden;
+}
+
+@media (max-width: 760px) {
+  .synod-legend {
+    width: 150px;
+    padding: 6px 9px 7px;
+    font-size: 0.66rem;
+  }
+
+  .synod-legend p.legend-faded {
+    display: none;
+  }
 }
 
 /* ---------- Popup ---------- */
@@ -665,6 +694,16 @@ input {
 .pop-addr {
   margin: 0 0 10px;
   color: var(--ink-2);
+}
+
+.pop-addr:has(+ .pop-region) {
+  margin-bottom: 2px;
+}
+
+.pop-region {
+  margin: 0 0 10px;
+  font-size: 0.76rem;
+  color: var(--ink-3);
 }
 
 .pop-tags {

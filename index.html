@@ -41,6 +41,7 @@
   <link rel="icon" href="denominational-seals/pftk.png">
   <link rel="preload" href="data/churches.json" as="fetch" crossorigin>
   <link rel="preload" href="data/synods.json" as="fetch" crossorigin>
+  <link rel="preload" href="data/presbyteries.json" as="fetch" crossorigin>
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -95,6 +96,12 @@
         <label for="synod">Synod</label>
         <select id="synod">
           <option value="">All synods</option>
+        </select>
+      </div>
+      <div class="select-row">
+        <label for="presbytery">Presbytery</label>
+        <select id="presbytery">
+          <option value="">All presbyteries</option>
         </select>
       </div>
       <label class="switch"><input type="checkbox" id="show-seminaries"><span>Show mainline seminaries</span></label>
