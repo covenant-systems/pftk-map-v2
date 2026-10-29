@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-CHURCH_FIELDS = ["id", "name", "lat", "lon", "rating", "address", "url", "maps", "size", "affiliate", "synod", "presbytery"]
+CHURCH_FIELDS = ["id", "name", "lat", "lon", "rating", "address", "url", "maps", "size", "affiliate", "synod"]
 SEMINARY_FIELDS = ["name", "city", "address", "denomination", "lat", "lon"]
 
 SIZES = {"XS", "S", "M", "L", "XL"}
@@ -146,7 +146,7 @@ def build_churches(src, place):
         rows.append([
             church_id, name, point[0], point[1], rating,
             text(p.get("full_address")), text(p.get("url")), maps, size, 1 if affiliate else 0,
-            synod, presbytery,
+            synod,
         ])
     rows.sort(key=lambda r: r[1].lower())
     return {"fields": CHURCH_FIELDS, "rows": rows}, skipped

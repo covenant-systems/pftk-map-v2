@@ -495,14 +495,8 @@ input {
 
 /* ---------- Synod overview ---------- */
 
-.leaflet-container:not(.mode-synods) .synod-shape,
-.leaflet-container:not(.mode-presbyteries) .presbytery-shape {
+.leaflet-container:not(.mode-synods) .synod-shape {
   pointer-events: none;
-}
-
-/* Presbyteries aren't drawn at all in the synod overview. */
-.mode-synods .presbytery-shape {
-  display: none;
 }
 
 .synod-badge-wrap {
@@ -560,15 +554,8 @@ input {
   color: var(--ink-2);
 }
 
-.leaflet-container:not(.mode-synods):not(.mode-presbyteries) .synod-legend,
-.leaflet-container:not(.mode-presbyteries) .legend-faded {
+.leaflet-container:not(.mode-synods) .synod-legend {
   display: none;
-}
-
-.synod-legend p.legend-faded {
-  margin: 6px 0 0;
-  font-weight: 400;
-  color: var(--ink-2);
 }
 
 .synod-legend p {
@@ -634,12 +621,8 @@ input {
   display: none;
 }
 
-.synod-badge-wrap.is-hidden {
-  visibility: hidden;
-}
-
-/* Shows the synod or presbytery the map is filtered to, centred over the
-   map. The crumb steps up to the synod; the cross clears both. */
+/* Shows the synod the map is filtered to, centred over the map; the
+   cross clears it. */
 .region-chip {
   position: fixed;
   top: 12px;
@@ -669,27 +652,6 @@ input {
   font-weight: 500;
 }
 
-.region-crumb {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: rgba(255, 255, 255, 0.75);
-  cursor: pointer;
-}
-
-.region-crumb:hover {
-  color: #fff;
-  text-decoration: underline;
-}
-
-.region-sep {
-  color: rgba(255, 255, 255, 0.5);
-}
-
 .region-close {
   flex: 0 0 28px;
   height: 28px;
@@ -713,11 +675,6 @@ input {
     max-width: calc(100vw - 80px);
     font-size: 0.8rem;
   }
-
-  .region-crumb,
-  .region-sep {
-    display: none;
-  }
 }
 
 @media (max-width: 760px) {
@@ -725,10 +682,6 @@ input {
     width: 150px;
     padding: 6px 9px 7px;
     font-size: 0.66rem;
-  }
-
-  .synod-legend p.legend-faded {
-    display: none;
   }
 }
 

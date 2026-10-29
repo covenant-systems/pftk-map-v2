@@ -41,7 +41,6 @@
   <link rel="icon" href="denominational-seals/pftk.png">
   <link rel="preload" href="data/churches.json" as="fetch" crossorigin>
   <link rel="preload" href="data/synods.json" as="fetch" crossorigin>
-  <link rel="preload" href="data/presbyteries.json" as="fetch" crossorigin>
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -98,12 +97,6 @@
           <option value="">All synods</option>
         </select>
       </div>
-      <div class="select-row">
-        <label for="presbytery">Presbytery</label>
-        <select id="presbytery">
-          <option value="">All presbyteries</option>
-        </select>
-      </div>
       <label class="switch"><input type="checkbox" id="show-seminaries"><span>Show mainline seminaries</span></label>
     </fieldset>
 
@@ -129,8 +122,6 @@
 
   <main id="map" aria-label="Map of churches"></main>
   <div class="region-chip" id="region-chip" role="status" hidden>
-    <button type="button" class="region-crumb" id="region-crumb"></button>
-    <span class="region-sep" id="region-sep" aria-hidden="true">›</span>
     <strong id="region-name"></strong>
     <button type="button" class="region-close" id="region-close" aria-label="Show all synods" title="Show all synods">&times;</button>
   </div>
